@@ -51,15 +51,19 @@ git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.c
 git('remote', 'add', 'upstream', `https://github.com/${upstream}.git`)
 git('fetch', '--no-tags', 'upstream', branch)
 const upstreamCommit = git('rev-parse', `upstream/${branch}`)
-const merge = spawnSync('git', ['merge', '--no-edit', `upstream/${branch}`], { encoding: 'utf8' })
-if (merge.status !== 0) {
-    git('merge', '--abort')
-    const conflictBranch = `sync-upstream/${upstreamCommit.slice(0, 12)}`
-    git('push', 'origin', `${upstreamCommit}:refs/heads/${conflictBranch}`)
-    const comparison = `https://github.com/${repository}/compare/${branch}...${conflictBranch}`
-    summary(`Merge conflicts require manual resolution: ${comparison}. Upstream changes saved to ${conflictBranch}; no releases were mirrored.`)
+const forkCommit = git('rev-parse', 'HEAD')
+const merge = spawnSync('git', ['merge', '--no-edit', '--no-commit', '--no-ff', `upstream/${branch}`], { encoding: 'utf8' })
+const hasMerge = spawnSync('git', ['rev-parse', '--quiet', '--verify', 'MERGE_HEAD']).status === 0
+// Keep this fork's workflow policy, including the prohibition on automatic image publishing.
+if (hasMerge) git('restore', `--source=${forkCommit}`, '--staged', '--worktree', '--', '.github/workflows')
+const conflicts = git('diff', '--name-only', '--diff-filter=U')
+if (conflicts || (merge.status !== 0 && !hasMerge)) {
+    if (hasMerge) git('merge', '--abort')
+    const comparison = `https://github.com/${repository}/compare/${branch}...${upstream.split('/')[0]}:${branch}`
+    summary(`Upstream ${upstreamCommit} requires manual resolution: ${comparison}. Conflicts: ${conflicts || merge.stderr}. No releases were mirrored.`)
     process.exitCode = 1
 } else {
+    if (hasMerge) git('commit', '--no-edit')
     git('push', 'origin', `HEAD:refs/heads/${branch}`)
     summary(`Synced ${upstream}/${branch}; fork changes retained.`)
 
@@ -73,16 +77,11 @@ if (merge.status !== 0) {
         let destination = await api(`/repos/${repository}/releases/tags/${escapedTag}`)
         if (!destination) {
             git('check-ref-format', `refs/tags/${tag}`)
-            git('fetch', '--no-tags', 'upstream', `refs/tags/${tag}`)
-            const tagObject = git('rev-parse', 'FETCH_HEAD')
-            const remoteTag = git('ls-remote', 'origin', `refs/tags/${tag}`).split(/\s/)[0]
-            if (remoteTag && remoteTag !== tagObject)
-                throw new Error(`Tag ${tag} already points to different fork code; refusing to overwrite it`)
-            if (!remoteTag) git('push', 'origin', `${tagObject}:refs/tags/${tag}`)
             destination = await api(`/repos/${repository}/releases`, 'POST', {
                 tag_name: tag,
+                target_commitish: branch,
                 name: source.name || tag,
-                body: `Synced from [${upstream}](${source.html_url}). This tag preserves the upstream release source; fork-specific fixes remain on ${branch}.\n\n${source.body || ''}`,
+                body: `Synced release notes and assets from [${upstream}](${source.html_url}). Newly created tags use the synchronized fork's ${branch} code; existing tags are retained. For the exact upstream source, use the linked upstream release.\n\n${source.body || ''}`,
                 draft: false,
                 prerelease: source.prerelease,
                 make_latest: latest?.tag_name === tag ? 'true' : 'false'
@@ -108,5 +107,5 @@ if (merge.status !== 0) {
             if (!upload.ok) throw new Error(`Cannot upload asset ${asset.name}: HTTP ${upload.status}`)
         }
     }
-    summary('Release metadata, upstream tags and attached assets synchronized. No Docker images built or published.')
+    summary('Release notes and attached assets synchronized; existing tags retained. No Docker images built or published.')
 }
