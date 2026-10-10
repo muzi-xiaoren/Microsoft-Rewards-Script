@@ -6,17 +6,25 @@ on:
 permissions:
     contents: write
 
+concurrency:
+    group: monthly-upstream-sync
+    cancel-in-progress: false
+
 jobs:
     release:
+        if: github.repository == 'muzi-xiaoren/Microsoft-Rewards-Script'
         runs-on: ubuntu-latest
+        timeout-minutes: 30
         steps:
             - uses: actions/checkout@v4
-            - name: Create source release only
+              with:
+                  ref: V4-china
+                  fetch-depth: 0
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+            - name: Build and release this fork
               env:
                   GH_TOKEN: ${{ github.token }}
-              run: |
-                  version="$(node -p "require('./package.json').version")"
-                  if ! gh release view "v${version}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-                      gh release create "v${version}" --repo "$GITHUB_REPOSITORY" \
-                          --target "$GITHUB_SHA" --title "v${version}" --generate-notes
-                  fi
+                  SYNC_REPOSITORY: ${{ github.repository }}
+              run: node scripts/github/release-fork.mjs

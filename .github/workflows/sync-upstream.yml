@@ -26,7 +26,7 @@ jobs:
             - uses: actions/setup-node@v4
               with:
                   node-version: 24
-            - name: Merge upstream and mirror releases without publishing images
+            - name: Merge upstream and package this fork without publishing images
               env:
                   GH_TOKEN: ${{ github.token }}
                   SYNC_REPOSITORY: ${{ github.repository }}
