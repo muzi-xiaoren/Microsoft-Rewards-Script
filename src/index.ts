@@ -19,6 +19,7 @@ import { checkNodeVersion } from './util/Validator'
 import { normalizeCountry, resolveAccountLocale } from './util/Locale'
 import type { AccountLocale } from './util/Locale'
 import { configureHumanize, shouldSkipRunToday, waitForQuietHours, markRunSucceeded } from './util/Humanize'
+import { isSuccessfulRun } from './util/RunCompletion'
 
 import { Login } from './browser/auth/Login'
 import Activities from './functions/Activities'
@@ -117,6 +118,7 @@ export class MicrosoftRewardsBot {
     public searchTopicsCache: { key: string; topics: Promise<string[]> } | null = null
 
     public accessToken = ''
+    public hadSearchFailure = false
     public cookies: { mobile: Cookie[]; desktop: Cookie[] }
     private fingerprintMobile?: BrowserFingerprintWithHeaders
     private fingerprintDesktop?: BrowserFingerprintWithHeaders
@@ -177,20 +179,12 @@ export class MicrosoftRewardsBot {
         let refreshSucceeded = false
 
         if (!account?.email) {
-            this.logger.debug(
-                this.isMobile,
-                'CONTEXT-REFRESH',
-                `无法刷新奖励上下文 | 原因=${reason} | 账户=不可用`
-            )
+            this.logger.debug(this.isMobile, 'CONTEXT-REFRESH', `无法刷新奖励上下文 | 原因=${reason} | 账户=不可用`)
             return false
         }
 
         try {
-            this.logger.warn(
-                this.isMobile,
-                'CONTEXT-REFRESH',
-                `请求失败后正在刷新奖励浏览器上下文 | 原因=${reason}`
-            )
+            this.logger.warn(this.isMobile, 'CONTEXT-REFRESH', `请求失败后正在刷新奖励浏览器上下文 | 原因=${reason}`)
 
             if (!page || page.isClosed()) {
                 recoverySession = await this.browserFactory.createBrowser(account)
@@ -277,7 +271,10 @@ export class MicrosoftRewardsBot {
         const totalAccounts = this.accounts.length
         const runStartTime = Date.now()
 
-        configureHumanize(this)
+        configureHumanize(
+            this,
+            this.accounts.map(account => account.email)
+        )
 
         this.logger.info(
             'main',
@@ -377,6 +374,7 @@ export class MicrosoftRewardsBot {
             )
 
             if (this.activeWorkers <= 0) {
+                hadWorkerFailure ||= !isSuccessfulRun(allAccountStats, this.accounts.length)
                 const totalCollectedPoints = allAccountStats.reduce((sum, s) => sum + s.collectedPoints, 0)
                 const totalInitialPoints = allAccountStats.reduce((sum, s) => sum + s.initialPoints, 0)
                 const totalFinalPoints = allAccountStats.reduce((sum, s) => sum + s.finalPoints, 0)
@@ -519,6 +517,7 @@ export class MicrosoftRewardsBot {
         const accountStats: AccountStats[] = []
 
         for (const [accountIndex, account] of accounts.entries()) {
+            this.hadSearchFailure = false
             if (accountIndex > 0) {
                 await this.waitBeforeNextAccount(account.email)
             }
@@ -584,7 +583,10 @@ export class MicrosoftRewardsBot {
                             finalPoints: accountFinalPoints,
                             collectedPoints: collectedPoints,
                             duration: parseFloat(durationSeconds),
-                            success: true
+                            success: !this.hadSearchFailure,
+                            ...(this.hadSearchFailure
+                                ? { error: 'Search session failed; daily completion flag not saved' }
+                                : {})
                         })
 
                         this.logger.info(
@@ -595,9 +597,10 @@ export class MicrosoftRewardsBot {
                         )
                     }
                 } else {
-                    const errorDetail = flowError && flowError !== 'undefined'
-                        ? flowError.replace(/\r?\n/g, ' ').slice(0, 120)
-                        : '流程失败（未捕获到错误详情）'
+                    const errorDetail =
+                        flowError && flowError !== 'undefined'
+                            ? flowError.replace(/\r?\n/g, ' ').slice(0, 120)
+                            : '流程失败（未捕获到错误详情）'
 
                     accountStats.push({
                         email: accountEmail,
@@ -642,14 +645,14 @@ export class MicrosoftRewardsBot {
                 'green'
             )
 
-            const hadFailure = accountStats.some(s => !s.success)
+            const hadFailure = !isSuccessfulRun(accountStats, accounts.length)
             await this.sendPushPlusSummary(accountStats, runStartTime, hadFailure)
             await this.sendServerChanSummary(accountStats, runStartTime, hadFailure)
             await this.sendClawBotSummary(accountStats, runStartTime, hadFailure)
             await flushAllWebhooks()
 
             if (!hadFailure) markRunSucceeded()
-            process.exit(0)
+            process.exit(hadFailure ? 1 : 0)
         }
 
         return accountStats
@@ -674,9 +677,7 @@ export class MicrosoftRewardsBot {
         this.logger.info(
             'main',
             'ACCOUNT-DELAY',
-            `等待 ${(delayMs / 1000).toFixed(1)} 秒后开始下一个账户${
-                nextEmail ? ` (${nextEmail})` : ''
-            }`
+            `等待 ${(delayMs / 1000).toFixed(1)} 秒后开始下一个账户${nextEmail ? ` (${nextEmail})` : ''}`
         )
         await this.utils.wait(delayMs)
     }
@@ -785,11 +786,7 @@ export class MicrosoftRewardsBot {
                             desktopSession = await this.createDesktopSession(account)
                         })
                         await closeDesktopSession()
-                        this.logger.info(
-                            'main',
-                            'FLOW',
-                            '桌面会话预热完成 | 后续桌面阶段将直接复用已保存会话'
-                        )
+                        this.logger.info('main', 'FLOW', '桌面会话预热完成 | 后续桌面阶段将直接复用已保存会话')
                     } catch (error) {
                         this.logger.warn(
                             'main',
@@ -803,11 +800,7 @@ export class MicrosoftRewardsBot {
 
                 if (fullApi) {
                     await closeMobileSession()
-                    this.logger.info(
-                        'main',
-                        'FLOW',
-                        '移动端登录浏览器已关闭；继续使用已保存的会话和 HTTP 请求'
-                    )
+                    this.logger.info('main', 'FLOW', '移动端登录浏览器已关闭；继续使用已保存的会话和 HTTP 请求')
                 }
 
                 const data: DashboardData = await this.browser.func.getDashboardData()
@@ -926,9 +919,7 @@ export class MicrosoftRewardsBot {
                             this.logger.error(
                                 this.isMobile,
                                 'EDGE-BROWSING',
-                                `意外的后台任务失败 | 信息=${
-                                    error instanceof Error ? error.message : String(error)
-                                }`
+                                `意外的后台任务失败 | 信息=${error instanceof Error ? error.message : String(error)}`
                             )
                         })
                         .finally(() => {
@@ -1104,11 +1095,7 @@ export class MicrosoftRewardsBot {
 
                 if (edgeBrowsingTask) {
                     if (!edgeBrowsingFinished) {
-                        this.logger.info(
-                            this.isMobile,
-                            'EDGE-BROWSING',
-                            '前台活动已完成；正在等待后台 Edge 浏览活动'
-                        )
+                        this.logger.info(this.isMobile, 'EDGE-BROWSING', '前台活动已完成；正在等待后台 Edge 浏览活动')
                     }
                     await edgeBrowsingTask
                     edgeBrowsingTask = null

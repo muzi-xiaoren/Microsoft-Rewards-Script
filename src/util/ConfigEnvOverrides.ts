@@ -296,7 +296,10 @@ Examples:
                 process.exit(1)
             }
             report.forced.forEach(f => console.log(`[entrypoint]   .${f.path} = ${f.value} (forced)`))
-            report.applied.forEach(a => console.log(`[entrypoint]   .${a.path} = ${JSON.stringify(a.value)}`))
+            report.applied.forEach(a => {
+                const value = /token|sendkey|appkey|password|secret/i.test(a.env) ? '[redacted]' : a.value
+                console.log(`[entrypoint]   .${a.path} = ${JSON.stringify(value)}`)
+            })
             console.log(`[entrypoint] Applied ${report.applied.length} override(s).`)
             process.exit(0)
         } catch (err) {

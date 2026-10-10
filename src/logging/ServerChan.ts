@@ -1,5 +1,3 @@
-import { httpRequest } from '../util/Http'
-import type { HttpRequestConfig } from '../util/Http'
 import PQueue from 'p-queue'
 import type { WebhookServerChanConfig } from '../interface/Config'
 import { flushQueue } from './Queue'
@@ -13,23 +11,28 @@ const serverChanQueue = new PQueue({
 export async function sendServerChan(config: WebhookServerChanConfig, content: string): Promise<void> {
     if (!config?.sendKey) return
 
-    const request: HttpRequestConfig = {
-        method: 'POST',
-        url: `https://sctapi.ft07.com/${config.sendKey}.send`,
-        headers: { 'Content-Type': 'application/json' },
-        data: {
-            title: config.title ?? 'Microsoft-Rewards-Script',
-            desp: content
-        },
-        timeout: 10000
-    }
+    // 使用 Node 内置 fetch 而非 impit，避免长时间运行后共享实例状态问题
+    const url = `https://sctapi.ftqq.com/${config.sendKey}.send`
+    const body = JSON.stringify({
+        title: config.title ?? 'Microsoft-Rewards-Script',
+        desp: content
+    })
 
     await serverChanQueue.add(async () => {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 10000)
         try {
-            await httpRequest(request)
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body,
+                signal: controller.signal
+            })
+            if (!res.ok) console.error(`[ServerChan] 推送失败 | status=${res.status}`)
         } catch (err) {
-            const status = (err as { response?: { status?: number } })?.response?.status
-            if (status === 429) return
+            console.error(`[ServerChan] 推送异常 | ${(err as Error)?.message}`)
+        } finally {
+            clearTimeout(timer)
         }
     })
 }

@@ -141,6 +141,7 @@ export class Search extends BaseActivity {
 
             return stats
         } catch (error) {
+            this.bot.hadSearchFailure = true
             this.bot.logger.error(
                 isMobile,
                 tracker.context,
@@ -281,18 +282,10 @@ class PointsTracker implements SearchTracker {
 
         if (this.missing.totalPoints <= 0) {
             if (!this.runOnZeroPoints) {
-                this.bot.logger.info(
-                    this.isMobile,
-                    this.context,
-                    '无可赚搜索积分，跳过（runOnZeroPoints 已禁用）'
-                )
+                this.bot.logger.info(this.isMobile, this.context, '无可赚搜索积分，跳过（runOnZeroPoints 已禁用）')
                 return false
             }
-            this.bot.logger.info(
-                this.isMobile,
-                this.context,
-                '未报告搜索积分，但 runOnZeroPoints 已启用，仍继续搜索'
-            )
+            this.bot.logger.info(this.isMobile, this.context, '未报告搜索积分，但 runOnZeroPoints 已启用，仍继续搜索')
         }
         return true
     }

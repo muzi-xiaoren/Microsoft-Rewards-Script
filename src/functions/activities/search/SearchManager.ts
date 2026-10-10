@@ -71,6 +71,7 @@ export class SearchManager {
             try {
                 return await this.bot.activities.doSearch(page, isMobile)
             } catch (error) {
+                this.bot.hadSearchFailure = true
                 this.bot.logger.error(
                     'main',
                     'SEARCH-MANAGER',

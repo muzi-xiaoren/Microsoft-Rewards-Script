@@ -1,18 +1,15 @@
-import fs from 'node:fs'
-import path from 'node:path'
-
 import type { MicrosoftRewardsBot } from '../index'
 import type { HumanizeConfig, QuietHoursRule } from '../interface/Config'
-import { getProjectRoot } from './ConfigSync'
+import { RunCompletionStore } from './RunCompletion'
 
 const DAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const
 
-const STATE_FILE = path.join(getProjectRoot(), 'logs', 'last-success.txt')
-
 let bot: MicrosoftRewardsBot | null = null
+let completionStore: RunCompletionStore | null = null
 
-export function configureHumanize(botInstance: MicrosoftRewardsBot): void {
+export function configureHumanize(botInstance: MicrosoftRewardsBot, accountEmails: string[]): void {
     bot = botInstance
+    completionStore = new RunCompletionStore(bot.config.sessionPath, accountEmails)
 }
 
 function humanizeConfig(): HumanizeConfig | undefined {
@@ -25,29 +22,21 @@ function enabled(): boolean {
 
 // ---------- 当天去重（skipWhenCompletedToday） ----------
 
-function todayKey(): string {
-    const now = new Date()
-    const month = String(now.getMonth() + 1).padStart(2, '0')
-    const day = String(now.getDate()).padStart(2, '0')
-    return `${now.getFullYear()}-${month}-${day}`
-}
-
 export function shouldSkipRunToday(): boolean {
-    if (!enabled() || !humanizeConfig()?.skipWhenCompletedToday) return false
-
-    try {
-        return fs.readFileSync(STATE_FILE, 'utf8').trim() === todayKey()
-    } catch {
-        return false
-    }
+    // Daily deduplication is independent of random delays and quiet hours.
+    if (!humanizeConfig()?.skipWhenCompletedToday) return false
+    return completionStore?.completedToday() ?? false
 }
 
 export function markRunSucceeded(): void {
     try {
-        fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true })
-        fs.writeFileSync(STATE_FILE, todayKey())
-    } catch {
-        // 状态文件写入失败不影响主流程
+        completionStore?.markCompleted()
+    } catch (error) {
+        bot?.logger.warn(
+            'main',
+            'RUN-STATE',
+            `无法保存运行完成标志，下次启动将重试 | ${error instanceof Error ? error.message : String(error)}`
+        )
     }
 }
 
@@ -110,11 +99,7 @@ export async function waitForQuietHours(): Promise<void> {
         if (waitMs <= 0) return
 
         const resumeAt = new Date(Date.now() + waitMs)
-        bot?.logger.info(
-            'main',
-            'HUMANIZE',
-            `当前处于静默时段，挂起到 ${formatClock(resumeAt)}（humanize.quietHours）`
-        )
+        bot?.logger.info('main', 'HUMANIZE', `当前处于静默时段，挂起到 ${formatClock(resumeAt)}（humanize.quietHours）`)
         await new Promise(resolve => setTimeout(resolve, waitMs))
     }
 }
