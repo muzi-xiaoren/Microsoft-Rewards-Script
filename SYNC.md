@@ -4,7 +4,7 @@
 
 `Monthly upstream code and releases` 工作流每月 1 日北京时间 08:17 执行，也支持在 GitHub Actions 中手动运行。GitHub 定时执行可能延迟。
 
-工作流合并上游 `V4-china` 并保留 fork 的提交。出现冲突时停止自动同步，创建待处理 PR；需要仓库允许 Actions 创建 PR。
+工作流合并上游 `V4-china` 并保留 fork 的提交。出现冲突时停止自动同步，将上游代码保存到待合并分支，并在运行摘要中提供比较链接，供手动处理。不需要扩大 Actions 的 PR 权限。
 
 合并成功后，工作流补齐上游公开 Release、原始标签及附件。原始标签指向上游发版代码，本 fork 的额外修复在 `V4-china` 分支上。已有 Release 不覆盖，已有标签指向不同提交时停止并报错。
 

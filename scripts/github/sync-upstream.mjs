@@ -56,18 +56,8 @@ if (merge.status !== 0) {
     git('merge', '--abort')
     const conflictBranch = `sync-upstream/${upstreamCommit.slice(0, 12)}`
     git('push', 'origin', `${upstreamCommit}:refs/heads/${conflictBranch}`)
-    const existing = await api(
-        `/repos/${repository}/pulls?state=open&head=${encodeURIComponent(repository.split('/')[0] + ':' + conflictBranch)}&base=${branch}`
-    )
-    const pr =
-        existing?.[0] ??
-        (await api(`/repos/${repository}/pulls`, 'POST', {
-            title: 'Resolve monthly upstream sync conflicts',
-            head: conflictBranch,
-            base: branch,
-            body: `Upstream ${upstream} could not merge cleanly. Resolve the conflicts while preserving the fork's fixes and workflow settings. Upstream commit: ${upstreamCommit}.`
-        }))
-    summary(`Merge conflicts require review: ${pr.html_url}. No releases were mirrored.`)
+    const comparison = `https://github.com/${repository}/compare/${branch}...${conflictBranch}`
+    summary(`Merge conflicts require manual resolution: ${comparison}. Upstream changes saved to ${conflictBranch}; no releases were mirrored.`)
     process.exitCode = 1
 } else {
     git('push', 'origin', `HEAD:refs/heads/${branch}`)
