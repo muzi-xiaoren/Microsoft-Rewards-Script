@@ -95,7 +95,8 @@ export default class BrowserFunc {
                     Referer: `${URLs.bing.origin}/`,
                     Origin: URLs.bing.origin
                 },
-                retries: 0
+                // Read-only quota request: retry transient TLS disconnects before failing the search session.
+                retries: 2
             })
 
             await this.applyResponseCookies(URLs.bing.rewardsFlyoutUserInfo, response.headers['set-cookie'])
